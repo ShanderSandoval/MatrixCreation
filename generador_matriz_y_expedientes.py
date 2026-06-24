@@ -12,22 +12,16 @@ RUTA_PROYECTO = os.path.dirname(os.path.abspath(__file__))
 
 # ⚙️ CONFIGURACIÓN AUTOMÁTICA CORES-PLATAFORMA PARA TESSERACT
 if os.name == 'nt':
-    ruta_windows = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    ruta_windows = r'C:\Teseract\tesseract.exe'
     if os.path.exists(ruta_windows):
         pytesseract.pytesseract.tesseract_cmd = ruta_windows
     
-    # 🔥 EL TRUCO PORTABLE
     ruta_tessdata_local = os.path.join(RUTA_PROYECTO, 'tessdata')
     os.environ['TESSDATA_PREFIX'] = ruta_tessdata_local
 else:
     ruta_mac = '/opt/homebrew/bin/tesseract'
     if os.path.exists(ruta_mac):
         pytesseract.pytesseract.tesseract_cmd = ruta_mac
-
-# Mapeo de emergencia por si falla el archivo de bancos
-MAPEO_BANCOS_BASICO = {
-    'BANCO DEL PICHINCHA': '1029', 'BANCO DEL PACIFICO': '1028', 'BANCO DE GUAYAQUIL': '1006'
-}
 
 def limpiar_nan(valor):
     if pd.isna(valor) or str(valor).strip().lower() in ['nan', 'nat', 'none', 'null']: return ""
@@ -37,55 +31,60 @@ def limpiar_numero_formato(valor):
     texto = limpiar_nan(valor)
     return texto[:-2] if texto.endswith('.0') else texto
 
-def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_grupo, callback=None):
+def obtener_valor_columna(df_row, posibles_nombres):
+    for col in posibles_nombres:
+        if col in df_row.index:
+            return df_row[col]
+    return ""
+
+def formatear_documento_identidad(valor):
+    texto = limpiar_numero_formato(valor)
+    if texto.isdigit() and len(texto) < 10:
+        return texto.zfill(10)
+    return texto.upper()
+
+def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_grupo, crear_carpetas=True, exportar_lote_dinardap=False, callback=None):
     
     def notificar(mensaje=None, progreso=None, texto_progreso=None):
         if mensaje: print(mensaje)
         if callback: callback(mensaje, progreso, texto_progreso)
 
-    notificar("🚀 Iniciando sistema de Consolidación Inteligente...", 2, "Preparando...")
+    notificar("🚀 Iniciando sistema de Consolidación Inteligente (V13 - Dinardap Integrado)...", 2, "Preparando...")
 
     ruta_plantilla = os.path.join(RUTA_PROYECTO, "PLANTILLA.xlsx")
     archivo_matriz_salida = os.path.join(ruta_salida_grupo, "Matriz_Contratos_Registrados.xlsx")
 
     if not os.path.exists(ruta_plantilla):
-        notificar("❌ ERROR: No se encontró 'PLANTILLA.xlsx' en la carpeta del programa.", 0, "Error")
+        notificar("❌ ERROR: No se encontró 'PLANTILLA.xlsx' en la carpeta.", 0, "Error")
         raise FileNotFoundError("Plantilla no encontrada.")
 
-    # =================================================================
-    # 🏦 CARGA DINÁMICA DEL DICCIONARIO DE BANCOS (bancos.xlsx o .csv)
-    # =================================================================
-    dict_bancos = {}
-    ruta_bancos_xlsx = os.path.join(RUTA_PROYECTO, "bancos.xlsx")
-    ruta_bancos_csv = os.path.join(RUTA_PROYECTO, "bancos.csv")
+    # 🏦 Carga dinámica del diccionario de Bancos
+    dict_bancos = {
+        'BANCO BOLIVARIANO': '1007', 'BANCO DE GUAYAQUIL': '1006', 'BANCO DE LOJA': '1025',
+        'BANCO DEL AUSTRO': '1004', 'BANCO DEL PACIFICO': '1028', 'BANCO DEL PICHINCHA': '1029',
+        'BANCO PRODUBANCO': '1033', 'COOPERATIVA DE AHORRO Y CREDITO 29 DE OCTUBRE LTDA.': '1122',
+        'COOPERATIVA DE AHORRO Y CREDITO VICENTINA MANUEL ESTEBAN GODOY ORTEGA LTDA.': '2129'
+    }
     
+    ruta_bancos_xlsx = os.path.join(RUTA_PROYECTO, "bancos.xlsx")
     try:
         if os.path.exists(ruta_bancos_xlsx):
             df_bancos = pd.read_excel(ruta_bancos_xlsx)
-            notificar("🏦 Archivo 'bancos.xlsx' detectado y cargado.", 3, "Cargando Bancos...")
-        elif os.path.exists(ruta_bancos_csv):
-            df_bancos = pd.read_csv(ruta_bancos_csv)
-            notificar("🏦 Archivo 'bancos.csv' detectado y cargado.", 3, "Cargando Bancos...")
-        else:
-            df_bancos = pd.DataFrame()
-            notificar("⚠️ No hay 'bancos.xlsx' en la carpeta. Se usará diccionario básico.", 3, "Aviso")
-            dict_bancos = MAPEO_BANCOS_BASICO
-
-        if not df_bancos.empty:
             for _, row in df_bancos.iterrows():
-                # Busca las columnas 'Nombre' y 'CODIGO' de tu archivo
                 nombre_b = str(row.get('Nombre', '')).strip().upper()
                 codigo_b = str(row.get('CODIGO', '')).strip()
-                if nombre_b and nombre_b != 'NAN':
+                if nombre_b and nombre_b != 'NAN': 
                     dict_bancos[nombre_b] = codigo_b
+            notificar("🏦 Base de datos 'bancos.xlsx' cargada con éxito.", 3, "Bancos listos")
     except Exception as e:
-        notificar(f"❌ Error al cargar lista de bancos: {e}", 3)
+        notificar(f"⚠️ Error al cargar bancos.xlsx, usando respaldo interno.", 3)
 
-    # Carga de la Base General
+    # Carga del Excel General
     try:
-        hojas = pd.read_excel(ruta_excel_general, sheet_name=None)
+        hojas = pd.read_excel(ruta_excel_general, sheet_name=None, dtype=str)
         df_general = pd.concat(hojas.values(), ignore_index=True)
-        df_general['CEDULA_STR'] = df_general['CEDULA'].apply(lambda x: limpiar_numero_formato(x).zfill(10))
+        df_general.columns = df_general.columns.str.strip().str.upper()
+        df_general['CEDULA_STR'] = df_general['CEDULA'].apply(formatear_documento_identidad)
         notificar(f"📊 Base de datos Excel cargada ({len(df_general)} registros).", 5, "Cargando Excel...")
     except Exception as e:
         notificar(f"❌ Error crítico al leer el Excel General: {e}", 0)
@@ -95,16 +94,18 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
         os.makedirs(ruta_salida_grupo)
 
     registros_matriz_final = []
+    paginas_fallidas = [] 
+    
     doc_maestro = fitz.open(ruta_pdf_maestro)
-    contador_estudiante = 1
     total_paginas = len(doc_maestro)
     
-    notificar("🔎 Escaneando contratos y aplicando Salvavidas de Datos...", 10, f"0/{total_paginas}")
+    notificar("🔎 Escaneando contratos con Inteligencia Artificial...", 10, f"0/{total_paginas}")
     
     for num_pagina in range(total_paginas):
-        progreso_actual = 10 + int((num_pagina / total_paginas) * 75)
-        texto_contador = f"{num_pagina + 1}/{total_paginas}"
+        numero_real_pagina = num_pagina + 1  
         
+        progreso_actual = 10 + int((numero_real_pagina / total_paginas) * 75)
+        texto_contador = f"{numero_real_pagina}/{total_paginas}"
         notificar(None, progreso_actual, texto_contador)
         
         pagina = doc_maestro[num_pagina]
@@ -112,29 +113,90 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
         img = Image.open(io.BytesIO(pix.tobytes("png")))
         texto = pytesseract.image_to_string(img, lang='spa').replace('\n', ' ')
         
-        if "CONTRATO" not in texto.upper() and "DBU-" not in texto.upper():
+        texto_corregido = texto.replace("8EA", "BEA").replace("8UL", "VUL").upper()
+        
+        # ====================================================================
+        # 🚨 ERROR 1: DOCUMENTO ILEGIBLE
+        # ====================================================================
+        if "CONTRATO" not in texto_corregido and "DBU-" not in texto_corregido:
+            paginas_fallidas.append(numero_real_pagina)
+            registros_matriz_final.append({
+                'No  BECARIO': numero_real_pagina,
+                'NUM_CONTRATO': f"⚠️ PÁG {numero_real_pagina} FALLIDA",
+                'PERIODO': 'LLENAR MANUAL', 'FACULTAD': 'LLENAR MANUAL', 'CARRERA': 'LLENAR MANUAL',
+                'TIPO_DOCUMENTO': '', 'CEDULA_O_PASAPORTE': 'ILEGIBLE',
+                'NOMBRE': "❌ RAZÓN: El OCR no reconoció la palabra CONTRATO (Escaneo muy borroso)",
+                'PROMEDIO': '', 'CORREO ELECTRONICO': '', 'TELEFONO ': '', 'DIRECCION': '',
+                'NUM_CUENTA': '', 'TIPO_CUENTA': '', 'ENTIDAD_BANCARIA': '', 'CODIGO BANCO': '', 'VALOR': ''
+            })
             continue 
 
-        match_contrato = re.search(r"(\d{4}-\d{4}-(?:VUL|BEA)-\d+)", texto, re.IGNORECASE)
-        contrato_final = match_contrato.group(1).strip().upper() if match_contrato else "NO_DETECTADO"
+        match_contrato = re.search(r"(\d{4}\s*-\s*\d{4}\s*-\s*(?:VUL|BEA)\s*-\s*\d+)", texto_corregido)
+        contrato_final = match_contrato.group(1).replace(" ", "") if match_contrato else "NO_DETECTADO"
         tipo_beca = "EXCELENCIA" if "BEA" in contrato_final else "VULNERABILIDAD" if "VUL" in contrato_final else "OTRA"
 
-        cedula_extraida = None
-        patron_principal = r"c[ée]dula.*?pasaporte\D{1,20}([A-Z0-9\s\-]{9,18})"
-        match_1 = re.search(patron_principal, texto, re.IGNORECASE)
-        if match_1:
-            cedula_sucia = match_1.group(1)
-            cedula_extraida = re.sub(r'[\s\-]', '', cedula_sucia).strip()
+        match_periodo = re.search(r"PERIODO ACAD[EÉ]MICO\s+(.*?)\s+CONTRATO", texto_corregido)
+        periodo_pdf = match_periodo.group(1).strip() if match_periodo else ""
 
+        # MOTOR CERO ERRORES: BÚSQUEDA INVERSA (CÉDULAS Y PASAPORTES)
+        cedula_extraida = None
+        texto_limpio_busqueda = re.sub(r'[\s\-]', '', texto_corregido) 
+        
+        patron_zona = r"(?:C[EÉ]DULA|PASAPORTE|C\.C\.)(?:NRO|NO)?([A-Z0-9]{7,20})"
+        match_zona = re.search(patron_zona, texto_limpio_busqueda)
+        
+        if match_zona:
+            zona_sucia = match_zona.group(1)
+            for doc_excel in df_general['CEDULA_STR'].unique():
+                if len(doc_excel) >= 7 and doc_excel in zona_sucia:
+                    cedula_extraida = doc_excel
+                    break
+        
         if not cedula_extraida:
+            for doc_excel in df_general['CEDULA_STR'].unique():
+                if len(doc_excel) >= 7 and doc_excel in texto_limpio_busqueda:
+                    cedula_extraida = doc_excel
+                    break
+
+        # ====================================================================
+        # 🚨 ERROR 2: DOCUMENTO (CÉDULA) NO DETECTADO
+        # ====================================================================
+        if not cedula_extraida:
+            paginas_fallidas.append(numero_real_pagina)
+            registros_matriz_final.append({
+                'No  BECARIO': numero_real_pagina,
+                'NUM_CONTRATO': f"⚠️ PÁG {numero_real_pagina} FALLIDA",
+                'PERIODO': 'LLENAR MANUAL', 'FACULTAD': 'LLENAR MANUAL', 'CARRERA': 'LLENAR MANUAL',
+                'TIPO_DOCUMENTO': '', 'CEDULA_O_PASAPORTE': 'NO DETECTADA',
+                'NOMBRE': "❌ RAZÓN: No se detectó ningún documento de identidad válido en esta página",
+                'PROMEDIO': '', 'CORREO ELECTRONICO': '', 'TELEFONO ': '', 'DIRECCION': '',
+                'NUM_CUENTA': '', 'TIPO_CUENTA': '', 'ENTIDAD_BANCARIA': '', 'CODIGO BANCO': '', 'VALOR': ''
+            })
             continue
 
         match_excel = df_general[df_general['CEDULA_STR'] == cedula_extraida]
-        if not match_excel.empty:
-            datos_estudiante = match_excel.iloc[0]
-            nombre_oficial = str(datos_estudiante['NOMBRE']).strip()
+        
+        # ====================================================================
+        # 🚨 ERROR 3: ESTUDIANTE NO ESTÁ EN EL EXCEL
+        # ====================================================================
+        if match_excel.empty:
+            paginas_fallidas.append(numero_real_pagina)
+            registros_matriz_final.append({
+                'No  BECARIO': numero_real_pagina,
+                'NUM_CONTRATO': f"⚠️ PÁG {numero_real_pagina} FALLIDA",
+                'PERIODO': 'LLENAR MANUAL', 'FACULTAD': 'LLENAR MANUAL', 'CARRERA': 'LLENAR MANUAL',
+                'TIPO_DOCUMENTO': '', 'CEDULA_O_PASAPORTE': cedula_extraida,
+                'NOMBRE': f"❌ RAZÓN: El documento {cedula_extraida} NO EXISTE en el Excel base",
+                'PROMEDIO': '', 'CORREO ELECTRONICO': '', 'TELEFONO ': '', 'DIRECCION': '',
+                'NUM_CUENTA': '', 'TIPO_CUENTA': '', 'ENTIDAD_BANCARIA': '', 'CODIGO BANCO': '', 'VALOR': ''
+            })
+            continue
             
-            nombre_carpeta = f"{contador_estudiante}_{cedula_extraida}_{nombre_oficial.replace(' ', '_')}"
+        datos_estudiante = match_excel.iloc[0]
+        nombre_oficial = str(datos_estudiante['NOMBRE']).strip()
+        
+        if crear_carpetas:
+            nombre_carpeta = f"{numero_real_pagina}_{cedula_extraida}_{nombre_oficial.replace(' ', '_')}"
             ruta_nueva_carpeta = os.path.join(ruta_salida_grupo, nombre_carpeta)
             os.makedirs(ruta_nueva_carpeta, exist_ok=True)
             
@@ -143,88 +205,101 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
             nuevo_pdf.insert_pdf(doc_maestro, from_page=num_pagina, to_page=num_pagina)
             nuevo_pdf.save(ruta_destino_pdf)
             nuevo_pdf.close()
-            
-            # ====================================================================
-            # 🛟 APLICACIÓN DE SALVAVIDAS (FALLBACKS) MEJORADOS
-            # ====================================================================
-            
-            # 1. TELÉFONO
-            tel_raw = limpiar_numero_formato(datos_estudiante.get('CELULAR', ''))
-            telefono_final = tel_raw.zfill(10) if tel_raw else "022542160"
+        
+        # --- 🛠️ EXTRACCIÓN DINÁMICA ---
+        periodo_excel = limpiar_nan(obtener_valor_columna(datos_estudiante, ['* PERIODO', 'PERIODO', 'PERÍODO']))
+        periodo_val = periodo_pdf if periodo_pdf else periodo_excel
+        
+        facultad_val = limpiar_nan(obtener_valor_columna(datos_estudiante, ['FACULTAD']))
+        carrera_val = limpiar_nan(obtener_valor_columna(datos_estudiante, ['CARRERA']))
+        correo_val = limpiar_nan(obtener_valor_columna(datos_estudiante, ['CORREO', 'CORREO INSTITUCIONAL', 'EMAIL']))
+        
+        promedio_raw = limpiar_nan(obtener_valor_columna(datos_estudiante, ['GENERAL', 'PROMEDIO']))
+        promedio_final = ""
+        if tipo_beca == "EXCELENCIA" and promedio_raw:
+            try:
+                prom_str = str(promedio_raw).replace(",", ".")
+                promedio_final = float(prom_str)
+            except ValueError:
+                promedio_final = promedio_raw
 
-            # 2. DIRECCIÓN
-            dir_raw = limpiar_nan(datos_estudiante.get('DIRECCION', ''))
-            direccion_final = dir_raw if dir_raw else "Ciudadela Universitaria"
+        tel_raw = limpiar_numero_formato(obtener_valor_columna(datos_estudiante, ['CELULAR', 'TELEFONO', 'TELÉFONO']))
+        telefono_final = tel_raw.zfill(10) if tel_raw else "022542160"
 
-            # 3. TIPO Y NÚMERO DE CUENTA
-            cuenta_final = limpiar_numero_formato(datos_estudiante.get('No CUENTA', ''))
-            tipo_cuenta_final = limpiar_nan(datos_estudiante.get('TIPO CUENTA', ''))
+        dir_raw = limpiar_nan(obtener_valor_columna(datos_estudiante, ['DIRECCION', 'DIRECCIÓN']))
+        direccion_final = dir_raw if dir_raw else "Ciudadela Universitaria"
 
-            # Si nos falta la cuenta o el tipo, usamos la Regex Letal
-            if not cuenta_final or not tipo_cuenta_final:
-                # Busca la palabra cuenta, luego atrapa (ahorros/corriente) opcionalmente, salta basura, y atrapa el número
-                match_cuenta = re.search(r"cuenta\s*(?:de\s*)?:?\s*(ahorros?|corriente)?.*?(\d{7,15})", texto, re.IGNORECASE)
-                if match_cuenta:
-                    if not tipo_cuenta_final and match_cuenta.group(1):
-                        tipo = match_cuenta.group(1).upper()
-                        tipo_cuenta_final = "AHORROS" if "AHORRO" in tipo else "CORRIENTE"
-                    
-                    if not cuenta_final and match_cuenta.group(2):
-                        cuenta_final = match_cuenta.group(2).strip()
+        cuenta_final = limpiar_numero_formato(obtener_valor_columna(datos_estudiante, ['NO. CUENTA', 'NO CUENTA', 'CUENTA', 'N° CUENTA']))
+        tipo_cuenta_final = limpiar_nan(obtener_valor_columna(datos_estudiante, ['TIPO CUENTA', 'TIPO_CUENTA']))
 
-            tipo_cuenta_final = str(tipo_cuenta_final).upper() if tipo_cuenta_final else ""
+        match_bloque = re.search(r"CUENTA\s*[:\-]?\s*(AHORROS?|CORRIENTE)?\D*?(\d{7,15})", texto_corregido)
+        if match_bloque:
+            if not tipo_cuenta_final and match_bloque.group(1):
+                tipo_cuenta_final = "AHORROS" if "AHORRO" in match_bloque.group(1) else "CORRIENTE"
+            if not cuenta_final and match_bloque.group(2):
+                cuenta_final = match_bloque.group(2).strip()
 
-            # 4. ENTIDAD BANCARIA Y CÓDIGO
-            banco_raw = limpiar_nan(datos_estudiante.get('ENTIDAD BANCARIA', '')).upper()
-            codigo_banco_final = ""
-            
-            if banco_raw in dict_bancos:
-                codigo_banco_final = dict_bancos[banco_raw]
-            else:
-                banco_encontrado = ""
-                # Ordenamos los bancos por longitud para evitar que "BANCO DEL AUSTRO" se corte solo en "BANCO"
-                bancos_ordenados = sorted(dict_bancos.keys(), key=len, reverse=True)
-                for nombre_b in bancos_ordenados:
-                    if nombre_b in texto.upper() and len(nombre_b) > 4:
-                        banco_encontrado = nombre_b
-                        codigo_banco_final = dict_bancos[nombre_b]
-                        break
-                
-                # Rescate Visual: Si Tesseract leyó el banco con algún error leve, atrapamos la palabra BANCO/COOP
-                if not banco_encontrado:
-                    match_banco_regex = re.search(r"(BANCO\s+DE\s+\w+|BANCO\s+DEL\s+\w+|BANCO\s+\w+|COOPERATIVA\s+[\w\s]+)", texto, re.IGNORECASE)
-                    if match_banco_regex:
-                        posible_banco = match_banco_regex.group(1).strip().upper()
-                        # Cruzamos la captura con nuestro diccionario
-                        for nombre_b, cod_b in dict_bancos.items():
-                            if nombre_b in posible_banco or posible_banco in nombre_b:
-                                banco_encontrado = nombre_b
-                                codigo_banco_final = cod_b
-                                break
+        tipo_cuenta_final = str(tipo_cuenta_final).upper() if tipo_cuenta_final else ""
 
-                if banco_encontrado:
-                    banco_raw = banco_encontrado
+        banco_raw = limpiar_nan(obtener_valor_columna(datos_estudiante, ['ENTIDAD BANCARIA', 'BANCO'])).upper()
+        codigo_banco_final = ""
+        banco_encontrado = ""
+        bancos_ordenados = sorted(dict_bancos.keys(), key=len, reverse=True)
 
-            # Registramos al estudiante
-            registros_matriz_final.append({
-                'No  BECARIO': contador_estudiante, 'NUM_CONTRATO': contrato_final,
-                'PERIODO': limpiar_nan(datos_estudiante.get('PERIODO', '')),
-                'FACULTAD': limpiar_nan(datos_estudiante.get('FACULTAD', '')),
-                'CARRERA': limpiar_nan(datos_estudiante.get('CARRERA', '')),
-                'TIPO_DOCUMENTO': 'CEDULA' if cedula_extraida.isdigit() and len(cedula_extraida) <= 10 else 'PASAPORTE',
-                'CEDULA_O_PASAPORTE': cedula_extraida, 'NOMBRE': nombre_oficial,
-                'CORREO ELECTRONICO': limpiar_nan(datos_estudiante.get('CORREO INSTITUCIONAL', '')),
-                'TELEFONO ': telefono_final,
-                'DIRECCION': direccion_final,
-                'NUM_CUENTA': cuenta_final,
-                'TIPO_CUENTA': tipo_cuenta_final,
-                'ENTIDAD_BANCARIA': banco_raw, 
-                'CODIGO BANCO': codigo_banco_final,
-                'VALOR': 400
-            })
-            
-            notificar(f"✅ Procesado #{contador_estudiante}: {nombre_oficial} [{tipo_beca}]", progreso_actual, texto_contador)
-            contador_estudiante += 1
+        if banco_raw:
+            for nombre_b in bancos_ordenados:
+                if banco_raw in nombre_b or nombre_b in banco_raw:
+                    banco_encontrado = nombre_b
+                    codigo_banco_final = dict_bancos[nombre_b]
+                    break
+
+        if not banco_encontrado:
+            for nombre_b in bancos_ordenados:
+                if nombre_b in texto_corregido:
+                    banco_encontrado = nombre_b
+                    codigo_banco_final = dict_bancos[nombre_b]
+                    break
+
+        if not banco_encontrado:
+            if "PICHINCHA" in texto_corregido:
+                banco_encontrado, codigo_banco_final = "BANCO DEL PICHINCHA", "1029"
+            elif "GUAYAQUIL" in texto_corregido:
+                banco_encontrado, codigo_banco_final = "BANCO DE GUAYAQUIL", "1006"
+            elif "PACIFICO" in texto_corregido or "PACÍFICO" in texto_corregido:
+                banco_encontrado, codigo_banco_final = "BANCO DEL PACIFICO", "1028"
+            elif "AUSTRO" in texto_corregido:
+                banco_encontrado, codigo_banco_final = "BANCO DEL AUSTRO", "1004"
+            elif "BOLIVARIANO" in texto_corregido:
+                banco_encontrado, codigo_banco_final = "BANCO BOLIVARIANO", "1007"
+            elif "LOJA" in texto_corregido:
+                banco_encontrado, codigo_banco_final = "BANCO DE LOJA", "1025"
+            elif "29 DE OCTUBRE" in texto_corregido:
+                banco_encontrado, codigo_banco_final = "COOPERATIVA DE AHORRO Y CREDITO 29 DE OCTUBRE LTDA.", "1122"
+
+        if banco_encontrado: 
+            banco_raw = banco_encontrado
+
+        registros_matriz_final.append({
+            'No  BECARIO': numero_real_pagina, 
+            'NUM_CONTRATO': contrato_final,
+            'PERIODO': periodo_val,
+            'FACULTAD': facultad_val,
+            'CARRERA': carrera_val,
+            'TIPO_DOCUMENTO': 'CEDULA' if cedula_extraida.isdigit() and len(cedula_extraida) <= 10 else 'PASAPORTE',
+            'CEDULA_O_PASAPORTE': cedula_extraida, 
+            'NOMBRE': nombre_oficial,
+            'PROMEDIO': promedio_final,
+            'CORREO ELECTRONICO': correo_val,
+            'TELEFONO ': telefono_final, 
+            'DIRECCION': direccion_final, 
+            'NUM_CUENTA': cuenta_final,
+            'TIPO_CUENTA': tipo_cuenta_final, 
+            'ENTIDAD_BANCARIA': banco_raw, 
+            'CODIGO BANCO': codigo_banco_final, 
+            'VALOR': 400
+        })
+        
+        notificar(f"✅ Procesado: {nombre_oficial} (Pág {numero_real_pagina})", progreso_actual, texto_contador)
 
     doc_maestro.close()
 
@@ -234,11 +309,13 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
     texto_final = f"{total_paginas}/{total_paginas}"
     if registros_matriz_final:
         try:
-            notificar(f"📝 Escribiendo datos y rellenando salvavidas en la plantilla...", 90, texto_final)
+            notificar("📝 Escribiendo matriz y aplicando acordeón...", 95, texto_final)
             wb = openpyxl.load_workbook(ruta_plantilla)
             ws = wb.active
             
             fila_estudiante = 2
+            lista_dinardap_rapida = [] # Memoria temporal por si piden lote directo
+            
             for registro in registros_matriz_final:
                 ws.cell(row=fila_estudiante, column=1, value=registro['No  BECARIO'])
                 ws.cell(row=fila_estudiante, column=2, value=registro['NUM_CONTRATO'])
@@ -251,40 +328,55 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
                 celda_cedula.number_format = '@'
                 
                 ws.cell(row=fila_estudiante, column=8, value=registro['NOMBRE'])
-                ws.cell(row=fila_estudiante, column=9, value=registro['CORREO ELECTRONICO'])
+                ws.cell(row=fila_estudiante, column=9, value=registro['PROMEDIO']) 
+                ws.cell(row=fila_estudiante, column=10, value=registro['CORREO ELECTRONICO'])
                 
-                celda_telefono = ws.cell(row=fila_estudiante, column=10, value=registro['TELEFONO '])
+                celda_telefono = ws.cell(row=fila_estudiante, column=11, value=registro['TELEFONO '])
                 celda_telefono.number_format = '@'
                 
-                ws.cell(row=fila_estudiante, column=11, value=registro['DIRECCION'])
+                ws.cell(row=fila_estudiante, column=12, value=registro['DIRECCION'])
                 
-                celda_cuenta = ws.cell(row=fila_estudiante, column=12, value=registro['NUM_CUENTA'])
+                celda_cuenta = ws.cell(row=fila_estudiante, column=13, value=registro['NUM_CUENTA'])
                 celda_cuenta.number_format = '@'
                 
-                ws.cell(row=fila_estudiante, column=13, value=registro['TIPO_CUENTA'])
-                ws.cell(row=fila_estudiante, column=14, value=registro['ENTIDAD_BANCARIA'])
-                ws.cell(row=fila_estudiante, column=15, value=registro['CODIGO BANCO'])
-                ws.cell(row=fila_estudiante, column=16, value=registro['VALOR']) 
+                ws.cell(row=fila_estudiante, column=14, value=registro['TIPO_CUENTA'])
+                ws.cell(row=fila_estudiante, column=15, value=registro['ENTIDAD_BANCARIA'])
+                ws.cell(row=fila_estudiante, column=16, value=registro['CODIGO BANCO'])
+                ws.cell(row=fila_estudiante, column=17, value=registro['VALOR'])
+                
+                # Guardar en lote Dinardap solo los válidos
+                if registro['CEDULA_O_PASAPORTE'] and registro['CEDULA_O_PASAPORTE'] not in ['ILEGIBLE', 'NO DETECTADA']:
+                    if "FALLIDA" not in registro['NUM_CONTRATO']:
+                        lista_dinardap_rapida.append({
+                            'CEDULA': registro['CEDULA_O_PASAPORTE'],
+                            'NOMBRE': registro['NOMBRE']
+                        })
                 
                 fila_estudiante += 1
 
-            # ACORDEÓN INVISIBLE
             total_estudiantes = len(registros_matriz_final)
             capacidad_plantilla = 100  
             if total_estudiantes < capacidad_plantilla:
                 fila_inicio_vacia = total_estudiantes + 2
                 for r in range(fila_inicio_vacia, capacidad_plantilla + 2):
                     ws.row_dimensions[r].hidden = True
-                notificar(f"🧹 Acordeón Invisible aplicado con éxito.", 95, texto_final)
 
             wb.save(archivo_matriz_salida)
-            notificar(f"🎉 ¡PROCESO COMPLETADO EXITOSAMENTE!\n📁 Guardado en:\n{ruta_salida_grupo}", 100, texto_final)
             
+            # 🔥 EXTRACCIÓN OPCIONAL EN FASE 1 DEL LOTE DINARDAP 🔥
+            if exportar_lote_dinardap and lista_dinardap_rapida:
+                df_din = pd.DataFrame(lista_dinardap_rapida)
+                ruta_din_salida = os.path.join(ruta_salida_grupo, "Lote_Dinardap_Fase1.xlsx")
+                df_din.to_excel(ruta_din_salida, index=False)
+                notificar(f"📄 Archivo complementario masivo 'Lote_Dinardap_Fase1.xlsx' exportado.")
+
+            if paginas_fallidas:
+                notificar(f"⚠️ MATRIZ GENERADA CON {len(paginas_fallidas)} EXCEPCIONES.\nLas filas fallidas mantuvieron su orden.\n📁 Guardado en: {ruta_salida_grupo}", 100, texto_final)
+            else:
+                notificar(f"🎉 MATRIZ GENERADA CON ÉXITO Y SIN ERRORES.\n📁 Guardado en: {ruta_salida_grupo}", 100, texto_final)
+        
         except Exception as e:
             notificar(f"❌ Error al guardar Excel: {e}", 100, "Error")
             raise e
     else:
-        notificar("⚠️ Terminado: No se detectaron registros válidos en el PDF.", 100, texto_final)
-
-if __name__ == "__main__":
-    pass
+        notificar("⚠️ No se detectaron registros válidos en el PDF.", 100, texto_final)
