@@ -70,7 +70,7 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
         if mensaje: print(mensaje)
         if callback: callback(mensaje, progreso, texto_progreso)
 
-    notificar("🚀 Iniciando sistema de Consolidación Inteligente (V22 - Formato Institucional Estricto)...", 2, "Preparando...")
+    notificar("🚀 Iniciando sistema de Consolidación Inteligente (V23 - Bordes Originales)...", 2, "Preparando...")
 
     ruta_plantilla = os.path.join(RUTA_PROYECTO, "PLANTILLA.xlsx")
 
@@ -373,7 +373,7 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
             periodos_validos = [r.get('PERIODO', '').strip() for r in registros_validos if r.get('PERIODO', '').strip()]
             periodo_enc = Counter(periodos_validos).most_common(1)[0][0] if periodos_validos else "2024-2025"
             
-            # 🔥 CORRECCIÓN 1: NORMALIZACIÓN ESTRICTA DEL PERÍODO A FORMATO "YYYY-YYYY"
+            # NORMALIZACIÓN ESTRICTA DEL PERÍODO A FORMATO "YYYY-YYYY"
             years = re.findall(r'\d{4}', periodo_enc)
             if len(years) == 2:
                 periodo_formateado = f"{years[0]}-{years[1]}"
@@ -384,7 +384,7 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
             
             grupo_enc = numero_grupo.strip() if numero_grupo else "1"
             
-            # 🔥 CORRECCIÓN 2: MAPEO TEXTUAL OFICIAL DE LOS TRES TIPOS SOLICITADOS
+            # MAPEO TEXTUAL OFICIAL DE LOS TRES TIPOS SOLICITADOS
             if tipo_lote == "EXCELENCIA":
                 tipo_beca_texto = "EXCELENCIA ACADEMICA"
             elif tipo_lote == "DISCAPACIDAD":
@@ -394,7 +394,7 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
             else:
                 tipo_beca_texto = "EXCELENCIA ACADEMICA"
 
-            # 🔥 CORRECCIÓN 3: CONSTRUCCIÓN DE LA TERCERA LÍNEA EXACTA
+            # CONSTRUCCIÓN DE LA TERCERA LÍNEA EXACTA
             linea_3_dinamica = f"PERÍODO {periodo_formateado} {tipo_beca_texto} - GRUPO {grupo_enc}"
             
             # Nombre de archivo dinámico para el guardado organizado
@@ -501,6 +501,8 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
                 ws.merge_cells(start_row=r_min, start_column=m["min_col"], end_row=r_max, end_column=m["max_col"])
 
             # Recreación perfecta de la tabla y los filtros desde la Fila 1
+            # 🔥 CORRECCIÓN APLICADA: Se eliminó el bucle que forzaba el contorno perimetral grueso.
+            # Ahora la tabla se mantendrá limpia y sutil heredando los estilos originales.
             ultima_col = get_column_letter(N_COLS)
             ref = f"A{HEADER_ROW}:{ultima_col}{ultima_fila_datos}"
             tabla = Table(displayName="Tabla1", ref=ref)
@@ -509,19 +511,6 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
                 showLastColumn=False, showRowStripes=True, showColumnStripes=False,
             )
             ws.add_table(tabla)
-
-            # Contorno de bordes perimetrales
-            grueso = Side(style="medium", color="FF000000")
-            for col in range(1, N_COLS + 1):
-                tc = ws.cell(row=HEADER_ROW, column=col)
-                tc.border = Border(left=tc.border.left, right=tc.border.right, top=grueso, bottom=tc.border.bottom)
-                bc = ws.cell(row=ultima_fila_datos, column=col)
-                bc.border = Border(left=bc.border.left, right=bc.border.right, top=bc.border.top, bottom=grueso)
-            for row in range(HEADER_ROW, ultima_fila_datos + 1):
-                lc = ws.cell(row=row, column=1)
-                lc.border = Border(left=grueso, right=lc.border.right, top=lc.border.top, bottom=lc.border.bottom)
-                rc = ws.cell(row=row, column=N_COLS)
-                rc.border = Border(left=rc.border.left, right=grueso, top=rc.border.top, bottom=rc.border.bottom)
 
             wb.save(archivo_matriz_salida)
 
