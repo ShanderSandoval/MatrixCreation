@@ -19,9 +19,11 @@ class InterfazBienestar:
         # Variables Pestaña 1
         self.ruta_pdf = tk.StringVar()
         self.ruta_excel = tk.StringVar()
-        self.ruta_salida_matriz = tk.StringVar(value="Esperando selección de Excel...")
+        self.ruta_salida_matriz = tk.StringVar(value="Esperando selección de Contratos (PDF)...")
         self.opcion_crear_carpetas = tk.BooleanVar(value=True)
         self.opcion_lote_dinardap = tk.BooleanVar(value=False)
+        self.numero_grupo = tk.StringVar()
+        self.nombre_encabezado = tk.StringVar()
         
         # Variables Pestaña 2
         self.ruta_grupo_alimento = tk.StringVar()
@@ -68,6 +70,14 @@ class InterfazBienestar:
         f_salida = tk.Frame(frame_t1); f_salida.pack(fill="x", pady=6)
         tk.Button(f_salida, text="3. Cambiar Salida (Opcional)", width=25, command=self.sel_salida_matriz).pack(side="left")
         tk.Label(f_salida, textvariable=self.ruta_salida_matriz, fg="gray", wraplength=450).pack(side="left", padx=10)
+
+        f_grupo_num = tk.Frame(frame_t1); f_grupo_num.pack(fill="x", pady=6)
+        tk.Label(f_grupo_num, text="4. Número de Grupo:", width=25, anchor="w", font=("Arial", 10, "bold")).pack(side="left")
+        tk.Entry(f_grupo_num, textvariable=self.numero_grupo, width=20).pack(side="left", padx=10)
+
+        f_encabezado = tk.Frame(frame_t1); f_encabezado.pack(fill="x", pady=6)
+        tk.Label(f_encabezado, text="5. Nombre del Encabezado:", width=25, anchor="w", font=("Arial", 10, "bold")).pack(side="left")
+        tk.Entry(f_encabezado, textvariable=self.nombre_encabezado, width=40).pack(side="left", padx=10)
 
         f_opcion = tk.Frame(frame_t1); f_opcion.pack(fill="x", pady=5)
         tk.Checkbutton(f_opcion, text="Crear Carpetas de Estudiantes y extraer PDFs individuales", 
@@ -166,14 +176,19 @@ class InterfazBienestar:
     # --- SELECCIONES ---
     def sel_pdf(self):
         r = filedialog.askopenfilename(title="Seleccionar PDF", filetypes=[("PDF", "*.pdf")])
-        if r: self.ruta_pdf.set(r)
+        if r:
+            self.ruta_pdf.set(r)
+            nombre_base = os.path.splitext(os.path.basename(r))[0]
+            self.ruta_salida_matriz.set(os.path.join(os.path.dirname(r), nombre_base))
 
     def sel_excel(self):
         # 🔥 Acepta ambos formatos
         r = filedialog.askopenfilename(title="Seleccionar Excel", filetypes=[("Excel", "*.xlsx *.xls")])
         if r:
             self.ruta_excel.set(r)
-            self.ruta_salida_matriz.set(os.path.join(os.path.dirname(r), "Resultados_Expedientes"))
+            # Si todavía no se ha elegido el PDF de Contratos, se usa una salida temporal junto al Excel
+            if not self.ruta_pdf.get():
+                self.ruta_salida_matriz.set(os.path.join(os.path.dirname(r), "Salida_Contratos"))
 
     def sel_salida_matriz(self):
         r = filedialog.askdirectory(title="Seleccionar Salida")
@@ -273,6 +288,8 @@ class InterfazBienestar:
                 self.ruta_salida_matriz.get(), 
                 crear_carpetas=self.opcion_crear_carpetas.get(),
                 exportar_lote_dinardap=self.opcion_lote_dinardap.get(),
+                numero_grupo=self.numero_grupo.get(),
+                nombre_encabezado=self.nombre_encabezado.get(),
                 callback=self.actualizar_pantalla
             )
             self.root.after(0, lambda: self._fin_proceso("✅ Fase 1 Completada."))
