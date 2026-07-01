@@ -10,6 +10,7 @@ from openpyxl.styles import Font, Alignment, Border, Side
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
 from copy import copy
+from collections import Counter
 
 # 📍 Obtenemos la ruta exacta de la carpeta donde está tu programa
 RUTA_PROYECTO = os.path.dirname(os.path.abspath(__file__))
@@ -69,7 +70,7 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
         if mensaje: print(mensaje)
         if callback: callback(mensaje, progreso, texto_progreso)
 
-    notificar("🚀 Iniciando sistema de Consolidación Inteligente (V18 - Calibración Fiel Plantilla)...", 2, "Preparando...")
+    notificar("🚀 Iniciando sistema de Consolidación Inteligente (V22 - Formato Institucional Estricto)...", 2, "Preparando...")
 
     ruta_plantilla = os.path.join(RUTA_PROYECTO, "PLANTILLA.xlsx")
 
@@ -334,7 +335,6 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
     # =======================================================
     # 4. CONSTRUCCIÓN DE EXCEL FIEL AL 100% (SIN FILAS EXTRAS)
     # =======================================================
-    # 🔥 CALIBRACIÓN MILIMÉTRICA BASADA EN TU IMAGEN REAL
     HEADER_ROW         = 1     # Fila 1: Encabezados nativos de la tabla (No BECARIO, NUM_CONTRATO, etc.)
     FIRST_DATA_ROW     = 2     # Fila 2: Celda del Estudiante número 1
     ORIG_LAST_DATA_ROW = 101   # Fila 101: Celda del Estudiante número 100 en plantilla vacía
@@ -352,13 +352,9 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
 
     if registros_matriz_final:
         try:
-            # Determinamos los metadatos en base al primer contrato válido leído
-            tipo_lote = 'OTRA'
-            for r in registros_matriz_final:
-                t = r.get('TIPO_BECA', 'OTRA')
-                if t and t in ['EXCELENCIA', 'VULNERABILIDAD', 'DISCAPACIDAD']:
-                    tipo_lote = t
-                    break
+            # Lógica de Mayoría Absoluta para determinar tipo de beca
+            tipos_validos = [r.get('TIPO_BECA') for r in registros_matriz_final if r.get('TIPO_BECA') in ['EXCELENCIA', 'VULNERABILIDAD', 'DISCAPACIDAD']]
+            tipo_lote = Counter(tipos_validos).most_common(1)[0][0] if tipos_validos else 'OTRA'
 
             registros_validos  = []
             registros_anomalos = []
@@ -368,27 +364,60 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
                 else: registros_validos.append(r)
 
             if registros_anomalos:
-                lineas = [f"⚠️ SE DETECTARON {len(registros_anomalos)} CONTRATO(S) DISTINTOS AL TIPO DEL LOTE ({tipo_lote}) Y FUERON EXCLUIDOS:"]
+                lineas = [f"⚠️ SE DETECTARON {len(registros_anomalos)} CONTRATO(S) DISTINTOS A LA MAYORÍA DEL LOTE ({tipo_lote}) Y FUERON EXCLUIDOS:"]
                 for ra in registros_anomalos:
                     lineas.append(f"   • Pág {ra.get('PAGINA','-')} | {ra.get('NOMBRE','SIN NOMBRE')} | Contrato: {ra.get('NUM_CONTRATO','-')} | Tipo: {ra.get('TIPO_BECA','-')}")
                 notificar("\n".join(lineas), 92, texto_final)
 
-            # Generamos el nombre del archivo usando los datos enviados a la interfaz
-            periodo_enc = registros_validos[0].get('PERIODO', '').strip() if registros_validos else ""
-            grupo_enc   = numero_grupo.strip() if numero_grupo else ""
+            # Obtener el periodo más común detectado
+            periodos_validos = [r.get('PERIODO', '').strip() for r in registros_validos if r.get('PERIODO', '').strip()]
+            periodo_enc = Counter(periodos_validos).most_common(1)[0][0] if periodos_validos else "2024-2025"
             
+            # 🔥 CORRECCIÓN 1: NORMALIZACIÓN ESTRICTA DEL PERÍODO A FORMATO "YYYY-YYYY"
+            years = re.findall(r'\d{4}', periodo_enc)
+            if len(years) == 2:
+                periodo_formateado = f"{years[0]}-{years[1]}"
+            elif len(years) == 1:
+                periodo_formateado = f"{years[0]}-{int(years[0])+1}"
+            else:
+                periodo_formateado = "2024-2025"
+            
+            grupo_enc = numero_grupo.strip() if numero_grupo else "1"
+            
+            # 🔥 CORRECCIÓN 2: MAPEO TEXTUAL OFICIAL DE LOS TRES TIPOS SOLICITADOS
+            if tipo_lote == "EXCELENCIA":
+                tipo_beca_texto = "EXCELENCIA ACADEMICA"
+            elif tipo_lote == "DISCAPACIDAD":
+                tipo_beca_texto = "DISCAPACIDAD"
+            elif tipo_lote == "VULNERABILIDAD":
+                tipo_beca_texto = "VULNERABILIDAD"
+            else:
+                tipo_beca_texto = "EXCELENCIA ACADEMICA"
+
+            # 🔥 CORRECCIÓN 3: CONSTRUCCIÓN DE LA TERCERA LÍNEA EXACTA
+            linea_3_dinamica = f"PERÍODO {periodo_formateado} {tipo_beca_texto} - GRUPO {grupo_enc}"
+            
+            # Nombre de archivo dinámico para el guardado organizado
             partes_nombre_archivo = ["Matriz", "Contratos"]
             if grupo_enc: partes_nombre_archivo.append(f"Grupo_{grupo_enc}")
             if tipo_lote and tipo_lote != 'OTRA': partes_nombre_archivo.append(tipo_lote)
-            if periodo_enc: partes_nombre_archivo.append(periodo_enc.replace(" ", "_").replace("-", "_"))
+            if periodo_formateado: partes_nombre_archivo.append(periodo_formateado.replace("-", "_"))
             
-            # Formateamos caracteres inválidos para rutas de Windows
             nombre_limpio_excel = re.sub(r'[\\/*?:"<>|]', "", "_".join(partes_nombre_archivo)) + ".xlsx"
             archivo_matriz_salida = os.path.join(ruta_salida_grupo, nombre_limpio_excel)
 
             notificar("📝 Preparando plantilla base...", 93, texto_final)
             wb = openpyxl.load_workbook(ruta_plantilla)
             ws = wb.active
+
+            # Inyección limpia al encabezado técnico (Calibri 11 Regular, sin negritas)
+            formato_impresion = (
+                '&"Calibri,Regular"&11'
+                'UNIVERSIDAD CENTRAL DEL ECUADOR\n'
+                'DIRECCIÓN DE BIENESTAR UNIVERSITARIO - UNIDAD DE BECAS\n'
+                f'{linea_3_dinamica}'
+            )
+            ws.oddHeader.center.text = formato_impresion
 
             # Captura de estilos de bandas originales (Filas 2 y 3)
             estilo_impar = { col: capturar_estilo_celda(ws.cell(row=FIRST_DATA_ROW, column=col)) for col in range(1, N_COLS + 1) }
@@ -457,11 +486,11 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
             ultima_fila_datos = FIRST_DATA_ROW + n - 1
 
             notificar("📝 Restaurando firmas y pie de página compactos...", 98, texto_final)
-            for bloque in pie_filas:
-                row = ultima_fila_datos + bloque["offset"]
-                if bloque["altura"]:
-                    ws.row_dimensions[row].height = bloque["altura"]
-                for col, info in bloque["celdas"].items():
+            for bloques_f in pie_filas:
+                row = ultima_fila_datos + bloques_f["offset"]
+                if bloques_f["altura"]:
+                    ws.row_dimensions[row].height = bloques_f["altura"]
+                for col, info in bloques_f["celdas"].items():
                     c = ws.cell(row=row, column=col, value=info["valor"])
                     aplicar_estilo_celda(c, info["estilo"])
 
@@ -496,18 +525,15 @@ def generar_sistema_y_matriz(ruta_pdf_maestro, ruta_excel_general, ruta_salida_g
 
             wb.save(archivo_matriz_salida)
 
-# Conservada la exportación nativa de Dinardap (Fase 1) CON encabezado
+            # Conservada la exportación nativa de Dinardap (Fase 1) CON encabezado
             if exportar_lote_dinardap and lista_dinardap_rapida:
                 df_din = pd.DataFrame(lista_dinardap_rapida)
                 ruta_din_salida = os.path.join(ruta_salida_grupo, "Lote_Dinardap_Fase1.xlsx")
-                # Se cambia header=False a header=True
                 df_din[['CEDULA', 'NOMBRE']].to_excel(ruta_din_salida, index=False, header=True)
                 notificar("📄 Archivo 'Lote_Dinardap_Fase1.xlsx' exportado con encabezados.")
 
-            resumen = (f"🎉 MATRIZ GENERADA: {n} registros válidos"
-                       + (f" | {len(registros_anomalos)} excluidos" if registros_anomalos else "")
-                       + (f" | {len(paginas_fallidas)} fallos" if paginas_fallidas else "")
-                       + f"\n📄 Archivo guardado como: {os.path.basename(archivo_matriz_salida)}")
+            resumen = (f"🎉 MATRIZ GENERADA: {n} registros válidos\n"
+                       f"📄 Archivo guardado como: {os.path.basename(archivo_matriz_salida)}")
             notificar(resumen, 100, texto_final)
 
         except Exception as e:
